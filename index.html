@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TIMELAPSE TEST.</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="landing">
+
+<video class="bg" id="video" autoplay muted loop playsinline preload="auto"></video>
+<canvas class="stage" id="stage"></canvas>
+
+<h1 class="title" id="title"></h1>
+
+<div class="arc" id="arc" role="slider" tabindex="0"
+     aria-label="Posisi video" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+  <svg viewBox="0 0 600 130" aria-hidden="true">
+    <path id="path" class="track" d="M 30 100 Q 300 -8 570 100" />
+    <path id="fill" class="fill" d="M 30 100 Q 300 -8 570 100" pathLength="1" stroke-dasharray="0 1" />
+    <path class="hit" d="M 30 100 Q 300 -8 570 100" />
+    <g id="thumb">
+      <circle class="wave" r="30" />
+      <circle class="wave" r="30" />
+      <circle class="wave" r="30" />
+      <circle class="halo" r="15" />
+      <circle class="dot" r="7" />
+    </g>
+  </svg>
+</div>
+
+<script src="js/content.js"></script>
+<script>
+(function () {
+  var C = window.STRIP_CONTENT;
+  var S = Object.assign({
+    dashColor: '#fff', dashWidth: 2, dash: [10, 8], dashSpeed: 40,
+    lift: 0.05, ease: 0.14, shadowBlur: 40, shadowAlpha: 0.45
+  }, C.style);
+  var VW = C.videoSize[0], VH = C.videoSize[1];
+
+  var video = document.getElementById('video');
+  video.src = C.video;
+  document.getElementById('title').textContent = C.title;
+  document.title = C.title;
+
+  /* ================= Slider arc ================= */
+  var arc = document.getElementById('arc');
+  var svg = arc.querySelector('svg');
+  var path = document.getElementById('path');
+  var fill = document.getElementById('fill');
+  var thumb = document.getElementById('thumb');
+  var len = path.getTotalLength();
+  var N = 240, samples = [];
+  for (var i = 0; i <= N; i++) samples.push(path.getPointAtLength(len * i / N));
+  var dragging = false, wasPlaying = true, t = 0;
+
+  function renderArc(p) {
+    t = Math.max(0, Math.min(1, p));
+    var pt = path.getPointAtLength(len * t);
+    thumb.setAttribute('transform', 'translate(' + pt.x + ' ' + pt.y + ')');
+    fill.setAttribute('stroke-dasharray', t + ' 1');
+    arc.setAttribute('aria-valuenow', Math.round(t * 100));
+  }
+  function nearest(e) {
+    var m = svg.getScreenCTM().inverse();
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    p = p.matrixTransform(m);
+    var best = 0, bd = Infinity;
+    for (var i = 0; i <= N; i++) {
+      var dx = samples[i].x - p.x, dy = samples[i].y - p.y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best / N;
+  }
+  function seek(p) {
+    renderArc(p);
+    if (video.duration) video.currentTime = t * video.duration;
+  }
+  svg.addEventListener('pointerdown', function (e) {
+    dragging = true; wasPlaying = !video.paused; video.pause();
+    arc.classList.add('drag'); svg.setPointerCapture(e.pointerId); seek(nearest(e));
+  });
+  svg.addEventListener('pointermove', function (e) { if (dragging) seek(nearest(e)); });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false; arc.classList.remove('drag');
+    if (wasPlaying) video.play().catch(function () {});
+  }
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+  arc.addEventListener('keydown', function (e) {
+    var step = e.shiftKey ? 0.1 : 0.02;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp')   { seek(t + step); e.preventDefault(); }
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowDown') { seek(t - step); e.preventDefault(); }
+    if (e.key === 'Home') { seek(0); e.preventDefault(); }
+    if (e.key === 'End')  { seek(1); e.preventDefault(); }
+  });
+  renderArc(0);
+
+  /* ================= Area strip ================= */
+  var canvas = document.getElementById('stage');
+  var ctx = canvas.getContext('2d');
+  var W = 0, H = 0;
+
+  var areas = (C.areas || []).filter(function (a) { return a.points && a.points.length >= 3; })
+    .map(function (a) {
+      var cx = 0, cy = 0;
+      a.points.forEach(function (p) { cx += p[0]; cy += p[1]; });
+      return { id: a.id, name: a.name, points: a.points,
+               cx: cx / a.points.length, cy: cy / a.points.length, k: 0 };
+    });
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Sama seperti object-fit: cover
+  function cover() {
+    var s = Math.max(W / VW, H / VH);
+    return { s: s, ox: (W - VW * s) / 2, oy: (H - VH * s) / 2 };
+  }
+
+  function inside(pt, poly) {
+    var x = pt[0], y = pt[1], c = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  }
+  function hitTest(clientX, clientY) {
+    var m = cover();
+    var v = [(clientX - m.ox) / m.s, (clientY - m.oy) / m.s];
+    for (var i = areas.length - 1; i >= 0; i--) if (inside(v, areas[i].points)) return areas[i];
+    return null;
+  }
+
+  var hover = null, pinned = null;
+
+  document.addEventListener('pointermove', function (e) {
+    if (e.pointerType !== 'mouse') return;
+    if (e.target.closest && e.target.closest('.arc')) { hover = null; }
+    else { hover = hitTest(e.clientX, e.clientY); }
+    document.documentElement.style.cursor = hover ? 'pointer' : '';
+  });
+  document.addEventListener('pointerleave', function () { hover = null; });
+  document.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse') return;            // sentuh/pen: tap untuk menyalakan
+    if (e.target.closest && e.target.closest('.arc')) return;
+    var hit = hitTest(e.clientX, e.clientY);
+    pinned = (hit && hit !== pinned) ? hit : null;
+  });
+
+  function tracePath(P) {
+    ctx.beginPath();
+    ctx.moveTo(P[0][0], P[0][1]);
+    for (var i = 1; i < P.length; i++) ctx.lineTo(P[i][0], P[i][1]);
+    ctx.closePath();
+  }
+
+  function drawArea(a, m, now) {
+    var k = a.k, e = k * k * (3 - 2 * k);              // smoothstep
+    var sc = 1 + S.lift * e;
+    var cx = m.ox + a.cx * m.s, cy = m.oy + a.cy * m.s;
+    var Q = a.points.map(function (p) {
+      var x = m.ox + p[0] * m.s, y = m.oy + p[1] * m.s;
+      return [cx + (x - cx) * sc, cy + (y - cy) * sc];
+    });
+
+    // bayangan
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,' + (S.shadowAlpha * e) + ')';
+    ctx.shadowBlur = S.shadowBlur * e;
+    ctx.shadowOffsetY = 12 * e;
+    tracePath(Q); ctx.fillStyle = '#000'; ctx.fill();
+    ctx.restore();
+
+    // video terpotong + diperbesar
+    ctx.save();
+    tracePath(Q); ctx.clip();
+    ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy);
+    ctx.drawImage(video, m.ox, m.oy, VW * m.s, VH * m.s);
+    ctx.restore();
+
+    // garis putus-putus bergerak
+    ctx.save();
+    tracePath(Q);
+    ctx.setLineDash(S.dash);
+    ctx.lineDashOffset = -(now / 1000) * S.dashSpeed;
+    ctx.lineWidth = S.dashWidth;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = S.dashColor;
+    ctx.globalAlpha = e;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function frame(now) {
+    ctx.clearRect(0, 0, W, H);
+    var m = cover();
+    for (var i = 0; i < areas.length; i++) {
+      var a = areas[i];
+      var target = (a === hover || a === pinned) ? 1 : 0;
+      a.k += (target - a.k) * S.ease;
+      if (Math.abs(target - a.k) < 0.002) a.k = target;
+      if (a.k > 0) drawArea(a, m, now);
+    }
+    if (!dragging && video.duration) renderArc(video.currentTime / video.duration);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  video.play().catch(function () {});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Strip Finder</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="finder">
+
+<video class="bg" id="video" muted loop playsinline preload="auto"></video>
+<canvas class="stage" id="stage"></canvas>
+
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <h1>STRIP-FINDER</h1>
+    <div class="links">
+      <a href="index.html">Landing</a>
+      <button id="collapse" type="button" aria-label="Ciutkan panel">−</button>
+    </div>
+  </div>
+
+  <section>
+    <h2>Video</h2>
+    <div class="row">
+      <button id="play" type="button">Play</button>
+      <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Posisi video">
+      <span class="time" id="time">0:00 / 0:00</span>
+    </div>
+    <div class="readout" id="readout">x: –  y: –</div>
+  </section>
+
+  <section>
+    <h2>Area</h2>
+    <div class="areas" id="areas"></div>
+    <button id="addArea" type="button">+ Area baru</button>
+    <p class="hint">Klik video = tambah titik. Seret titik = pindah. Klik kanan titik = hapus. Backspace = hapus titik terakhir. Minimal 3 titik per area.</p>
+  </section>
+
+  <section style="flex:1; min-height:0;">
+    <h2>Hasil untuk js/content.js</h2>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="copy" type="button">Salin</button>
+      <span class="hint" id="status"></span>
+    </div>
+    <p class="hint">Paste menggantikan seluruh blok <code>areas: [ ... ],</code> di content.js.</p>
+  </section>
+</aside>
+
+<script src="js/content.js"></script>
+<script>
+(function () {
+  var C = window.STRIP_CONTENT;
+  var S = Object.assign({ dashSpeed: 40, dash: [10, 8] }, C.style);
+  var VW = C.videoSize[0], VH = C.videoSize[1];
+
+  var video = document.getElementById('video');
+  var canvas = document.getElementById('stage');
+  var ctx = canvas.getContext('2d');
+  var panel = document.getElementById('panel');
+  var listEl = document.getElementById('areas');
+  var outEl = document.getElementById('output');
+  var statusEl = document.getElementById('status');
+  var readout = document.getElementById('readout');
+  var playBtn = document.getElementById('play');
+  var seekEl = document.getElementById('seek');
+  var timeEl = document.getElementById('time');
+
+  video.src = C.video;
+  video.muted = true;
+
+  /* ---------- Data (dimuat dari content.js) ---------- */
+  var areas = (C.areas || []).map(function (a) {
+    return { id: a.id, name: a.name, points: a.points.map(function (p) { return [p[0], p[1]]; }) };
+  });
+  var cur = areas.length ? 0 : -1;
+  var drag = null, mouse = null, W = 0, H = 0;
+
+  /* ---------- Canvas & koordinat ---------- */
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function cover() {
+    var s = Math.max(W / VW, H / VH);
+    return { s: s, ox: (W - VW * s) / 2, oy: (H - VH * s) / 2 };
+  }
+  function toVideo(e) {
+    var m = cover();
+    var x = Math.round((e.clientX - m.ox) / m.s), y = Math.round((e.clientY - m.oy) / m.s);
+    return [Math.max(0, Math.min(VW, x)), Math.max(0, Math.min(VH, y))];
+  }
+  function toScreen(p, m) { return [m.ox + p[0] * m.s, m.oy + p[1] * m.s]; }
+
+  function findVertex(cx, cy) {
+    var m = cover(), best = null, bd = 14 * 14;
+    for (var ai = 0; ai < areas.length; ai++) {
+      for (var pi = 0; pi < areas[ai].points.length; pi++) {
+        var s = toScreen(areas[ai].points[pi], m);
+        var d = (s[0] - cx) * (s[0] - cx) + (s[1] - cy) * (s[1] - cy);
+        if (d <= bd) { bd = d; best = { ai: ai, pi: pi }; }
+      }
+    }
+    return best;
+  }
+
+  /* ---------- Area & panel ---------- */
+  function nextId() {
+    var n = 1;
+    while (areas.some(function (a) { return a.id === 'area-' + n; })) n++;
+    return n;
+  }
+  function newArea() {
+    var n = nextId();
+    areas.push({ id: 'area-' + n, name: 'Area ' + n, points: [] });
+    cur = areas.length - 1;
+  }
+
+  function renderList() {
+    listEl.innerHTML = '';
+    areas.forEach(function (a, i) {
+      var row = document.createElement('div');
+      row.className = 'area-item' + (i === cur ? ' active' : '');
+      var input = document.createElement('input');
+      input.value = a.name; input.setAttribute('aria-label', 'Nama area');
+      input.addEventListener('input', function () { a.name = input.value; updateOutput(); });
+      var count = document.createElement('span');
+      count.className = 'count'; count.textContent = a.points.length + ' titik';
+      var del = document.createElement('button');
+      del.className = 'del'; del.type = 'button'; del.textContent = '×';
+      del.setAttribute('aria-label', 'Hapus ' + a.name);
+      del.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (a.points.length && !confirm('Hapus "' + a.name + '"?')) return;
+        areas.splice(i, 1);
+        cur = areas.length ? Math.min(cur, areas.length - 1) : -1;
+        if (cur > i) cur--;
+        renderList(); updateOutput();
+      });
+      row.addEventListener('click', function () {
+        cur = i;
+        Array.prototype.forEach.call(listEl.children, function (el, j) {
+          el.classList.toggle('active', j === cur);
+        });
+      });
+      row.appendChild(input); row.appendChild(count); row.appendChild(del);
+      listEl.appendChild(row);
+    });
+  }
+
+  function buildOutput() {
+    var valid = areas.filter(function (a) { return a.points.length >= 3; });
+    if (!valid.length) return 'areas: [],';
+    var out = 'areas: [\n';
+    valid.forEach(function (a, i) {
+      out += '  {\n    id: ' + JSON.stringify(a.id) + ',\n    name: ' + JSON.stringify(a.name) +
+        ',\n    points: [' + a.points.map(function (p) { return '[' + p[0] + ', ' + p[1] + ']'; }).join(', ') +
+        ']\n  }' + (i < valid.length - 1 ? ',' : '') + '\n';
+    });
+    return out + '],';
+  }
+  function updateOutput() {
+    outEl.value = buildOutput();
+    var bad = areas.filter(function (a) { return a.points.length < 3; }).length;
+    statusEl.textContent = bad ? bad + ' area (<3 titik) tidak ikut diekspor' : '';
+  }
+  function changed(structural) { if (structural) renderList(); updateOutput(); }
+
+  document.getElementById('addArea').addEventListener('click', function () {
+    newArea(); changed(true);
+  });
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var btn = this, text = outEl.value;
+    function done() { btn.textContent = 'Tersalin'; setTimeout(function () { btn.textContent = 'Salin'; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else fallback();
+    function fallback() { outEl.select(); try { document.execCommand('copy'); done(); } catch (e) {} }
+  });
+
+  document.getElementById('collapse').addEventListener('click', function () {
+    panel.classList.toggle('collapsed');
+    this.textContent = panel.classList.contains('collapsed') ? '+' : '−';
+  });
+
+  /* ---------- Kontrol video ---------- */
+  function fmt(s) {
+    if (!isFinite(s)) return '0:00';
+    var m = Math.floor(s / 60), r = Math.floor(s % 60);
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+  function togglePlay() { if (video.paused) video.play().catch(function () {}); else video.pause(); }
+  playBtn.addEventListener('click', togglePlay);
+  video.addEventListener('play',  function () { playBtn.textContent = 'Pause'; });
+  video.addEventListener('pause', function () { playBtn.textContent = 'Play'; });
+  var scrubbing = false;
+  seekEl.addEventListener('input', function () {
+    scrubbing = true;
+    if (video.duration) video.currentTime = seekEl.value / 1000 * video.duration;
+  });
+  seekEl.addEventListener('change', function () { scrubbing = false; });
+
+  /* ---------- Interaksi canvas ---------- */
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return;
+    var hit = findVertex(e.clientX, e.clientY);
+    if (hit) {
+      cur = hit.ai; drag = hit;
+      canvas.setPointerCapture(e.pointerId);
+      Array.prototype.forEach.call(listEl.children, function (el, j) { el.classList.toggle('active', j === cur); });
+      return;
+    }
+    if (cur < 0) newArea();
+    areas[cur].points.push(toVideo(e));
+    changed(true);
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    mouse = [e.clientX, e.clientY];
+    var v = toVideo(e);
+    readout.textContent = 'x: ' + v[0] + '   y: ' + v[1];
+    if (drag) { areas[drag.ai].points[drag.pi] = v; updateOutput(); }
+    else canvas.style.cursor = findVertex(e.clientX, e.clientY) ? 'move' : 'crosshair';
+  });
+  canvas.addEventListener('pointerup', function () { drag = null; });
+  canvas.addEventListener('pointercancel', function () { drag = null; });
+  canvas.addEventListener('pointerleave', function () { mouse = null; });
+  canvas.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    var hit = findVertex(e.clientX, e.clientY);
+    if (hit) { areas[hit.ai].points.splice(hit.pi, 1); changed(true); }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    if (e.key === ' ' && tag !== 'button') { e.preventDefault(); togglePlay(); }
+    if ((e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) &&
+        cur >= 0 && areas[cur].points.length) {
+      e.preventDefault(); areas[cur].points.pop(); changed(true);
+    }
+  });
+
+  /* ---------- Gambar ---------- */
+  function trace(P, close) {
+    ctx.beginPath();
+    ctx.moveTo(P[0][0], P[0][1]);
+    for (var i = 1; i < P.length; i++) ctx.lineTo(P[i][0], P[i][1]);
+    if (close) ctx.closePath();
+  }
+
+  function frame(now) {
+    ctx.clearRect(0, 0, W, H);
+    var m = cover();
+
+    areas.forEach(function (a, ai) {
+      if (!a.points.length) return;
+      var active = ai === cur;
+      var P = a.points.map(function (p) { return toScreen(p, m); });
+
+      if (P.length >= 2) {
+        trace(P, P.length >= 3);
+        if (active && P.length >= 3) { ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fill(); }
+        ctx.save();
+        ctx.setLineDash(S.dash);
+        ctx.lineDashOffset = -(now / 1000) * S.dashSpeed;
+        ctx.lineWidth = 2; ctx.lineJoin = 'round';
+        ctx.strokeStyle = active ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.5)';
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // garis pratinjau ke kursor
+      if (active && mouse && !drag) {
+        var last = P[P.length - 1];
+        ctx.save();
+        ctx.setLineDash([3, 5]); ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(255,255,255,.55)';
+        ctx.beginPath(); ctx.moveTo(last[0], last[1]); ctx.lineTo(mouse[0], mouse[1]); ctx.stroke();
+        ctx.restore();
+      }
+
+      // titik
+      P.forEach(function (p, pi) {
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], pi === 0 ? 7 : (active ? 5 : 3.5), 0, Math.PI * 2);
+        ctx.fillStyle = active ? '#fff' : 'rgba(255,255,255,.65)';
+        ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.stroke();
+      });
+    });
+
+    if (!scrubbing && video.duration) seekEl.value = Math.round(video.currentTime / video.duration * 1000);
+    timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+    requestAnimationFrame(frame);
+  }
+
+  renderList();
+  updateOutput();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

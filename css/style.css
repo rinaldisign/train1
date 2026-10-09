@@ -1,0 +1,169 @@
+/* ==========================================================
+   style.css — dipakai bersama oleh index.html & strip-finder.html
+   ========================================================== */
+
+:root { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: inherit; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  overflow: hidden;
+  font-family: "Helvetica Neue", Arial, system-ui, sans-serif;
+  color: #fff;
+}
+
+/* ---------- Video & canvas (dipakai kedua halaman) ---------- */
+.bg {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.stage {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  z-index: 1;
+}
+.landing .stage { pointer-events: none; }
+.finder  .stage { cursor: crosshair; touch-action: none; }
+
+/* ---------- Landing: judul ---------- */
+.title {
+  position: fixed; z-index: 2;
+  top: max(28px, env(safe-area-inset-top));
+  left: max(32px, env(safe-area-inset-left));
+  margin: 0;
+  color: #fff;
+  font-size: clamp(16px, 2vw, 22px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: .08em;
+  text-shadow: 0 1px 14px rgba(0,0,0,.35);
+}
+
+/* ---------- Landing: slider arc ---------- */
+.arc {
+  position: fixed; z-index: 2;
+  left: 50%; transform: translateX(-50%);
+  bottom: max(28px, env(safe-area-inset-bottom));
+  width: min(600px, 88vw);
+  touch-action: none;
+  user-select: none; -webkit-user-select: none;
+  outline: none;
+}
+.arc svg { display: block; width: 100%; height: auto; overflow: visible; cursor: pointer; }
+
+.arc .track { fill: none; stroke: rgba(255,255,255,.28); stroke-width: 3; stroke-linecap: round; }
+.arc .fill  { fill: none; stroke: rgba(255,255,255,.75); stroke-width: 3; stroke-linecap: round; }
+.arc .hit   { fill: none; stroke: transparent; stroke-width: 56; }
+
+.arc .dot  { fill: #fff; }
+.arc .halo { fill: rgba(255,255,255,.18); }
+.arc .wave {
+  fill: rgba(255,255,255,.14);
+  stroke: rgba(255,255,255,.55);
+  stroke-width: 1;
+  transform-box: fill-box; transform-origin: center;
+  opacity: 0;
+  animation: wave 2.6s cubic-bezier(.2,.6,.3,1) infinite;
+}
+.arc .wave:nth-child(2) { animation-delay: .87s; }
+.arc .wave:nth-child(3) { animation-delay: 1.74s; }
+.arc.drag .wave { animation-duration: 1.3s; }
+.arc.drag .halo { fill: rgba(255,255,255,.3); }
+
+@keyframes wave {
+  0%   { transform: scale(.3); opacity: .9; }
+  100% { transform: scale(1);  opacity: 0; }
+}
+
+.arc:focus-visible .dot { stroke: rgba(255,255,255,.9); stroke-width: 3; paint-order: stroke; }
+
+@media (prefers-reduced-motion: reduce) {
+  .arc .wave { animation: none; opacity: .35; transform: scale(.8); }
+}
+
+/* ==========================================================
+   Strip-finder: panel
+   ========================================================== */
+.panel {
+  position: fixed; z-index: 3;
+  top: 16px; right: 16px; bottom: 16px;
+  width: 320px;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px;
+  background: rgba(16,16,18,.72);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-y: auto;
+}
+.panel.collapsed { bottom: auto; width: auto; }
+.panel.collapsed > *:not(.panel-head) { display: none; }
+
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel-head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .06em; }
+.panel-head .links { display: flex; align-items: center; gap: 10px; }
+.panel a { color: rgba(255,255,255,.75); text-decoration: none; }
+.panel a:hover { color: #fff; }
+
+.panel section { display: flex; flex-direction: column; gap: 8px; }
+.panel h2 { margin: 0; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.6); }
+
+.panel button {
+  font: inherit; color: #fff; cursor: pointer;
+  padding: 7px 11px;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px;
+}
+.panel button:hover { background: rgba(255,255,255,.2); }
+.panel button:focus-visible,
+.panel input:focus-visible,
+.panel textarea:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+.row { display: flex; align-items: center; gap: 8px; }
+.row input[type="range"] { flex: 1; accent-color: #fff; }
+.row .time { min-width: 86px; text-align: right; font-variant-numeric: tabular-nums; color: rgba(255,255,255,.7); }
+
+.areas { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; }
+.area-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  cursor: pointer;
+}
+.area-item.active { border-color: rgba(255,255,255,.7); background: rgba(255,255,255,.14); }
+.area-item input {
+  flex: 1; min-width: 0;
+  font: inherit; color: #fff;
+  background: transparent; border: 0; padding: 2px 0;
+}
+.area-item .count { color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
+.area-item .del { padding: 2px 8px; }
+
+.readout { font-variant-numeric: tabular-nums; color: rgba(255,255,255,.8); }
+
+.panel textarea {
+  width: 100%; min-height: 150px; flex: 1;
+  resize: vertical;
+  font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+  color: #fff;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.hint { margin: 0; color: rgba(255,255,255,.55); font-size: 12px; }
+
+@media (max-width: 720px) {
+  .panel { left: 12px; right: 12px; top: auto; bottom: 12px; width: auto; max-height: 56vh; }
+}
